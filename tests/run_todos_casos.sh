@@ -1,8 +1,6 @@
 #!/bin/bash
 # RODA OS 10 CASOS DE TESTE, CADA UM EM SEU PROPRIO TESTBENCH, E MOSTRA O RESUMO
-# E A TABELA (ENTRADA / ESPERADO / OBTIDO / CICLOS) PRONTA PARA O RELATORIO.
 # USO: ./tests/run_todos_casos.sh
-# LOGS EM build/tb_caso_NN.log E ONDAS EM build/tb_caso_NN.ghw
 source "$(dirname "$0")/_compila.sh"
 
 compila_projeto || exit 1

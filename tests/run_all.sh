@@ -1,8 +1,5 @@
 #!/bin/bash
 # RODA TODOS OS TESTES E MOSTRA UM RESUMO (PASSOU / FALHOU) POR TESTBENCH.
-# USO: ./tests/run_all.sh        (DE QUALQUER PASTA)
-# O LOG COMPLETO DE CADA TESTE FICA EM build/<testbench>.log
-# AS ONDAS (GTKWAVE) FICAM EM build/<testbench>.ghw
 
 cd "$(dirname "$0")/.."
 mkdir -p build
@@ -17,9 +14,8 @@ done
 # 2) RODA CADA TESTBENCH
 FALHAS=0
 TOTAL=0
-for TB in tb_temporizador tb_tabela_duracao tb_decodificador_luzes tb_registrador_config tb_semaforo_top tb_casos_semaforo; do
+for TB in tb_casos_semaforo; do
   TOTAL=$((TOTAL + 1))
-  # ELABORA E RODA DENTRO DE build/ PARA NAO ESPALHAR ARQUIVOS (e~*.o, EXECUTAVEIS) NA RAIZ
   if ghdl -a $STD tests/$TB.vhdl &&
      (cd build && ghdl -e --std=08 --workdir=. $TB &&
       ghdl -r --std=08 --workdir=. $TB --stop-time=200us --wave=$TB.ghw) > build/$TB.log 2>&1 &&

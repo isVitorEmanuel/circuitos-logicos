@@ -1,8 +1,6 @@
 #!/bin/bash
 # RODA UM CASO DE TESTE ESPECIFICO (1 A 10).
 # USO:  ./tests/run_caso.sh 3          RODA O CASO 3
-#       ./tests/run_caso.sh 3 ondas    RODA E ABRE AS ONDAS NO GTKWAVE
-# O LOG FICA EM build/tb_caso_NN.log E AS ONDAS EM build/tb_caso_NN.ghw
 source "$(dirname "$0")/_compila.sh"
 
 if ! [[ "$1" =~ ^[0-9]+$ ]] || [ "$((10#$1))" -lt 1 ] || [ "$((10#$1))" -gt 10 ]; then
