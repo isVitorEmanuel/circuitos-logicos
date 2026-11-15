@@ -17,12 +17,6 @@ circuitos-logicos/
 ├── semaforo_top.vhdl             # top-level: liga todos os módulos
 ├── tests/
 │   ├── run_all.sh                    # roda todos os testbenches e mostra o resumo
-│   ├── run_test_temporizador.sh      # roda só o teste do temporizador
-│   ├── tb_temporizador.vhdl          # testbench do temporizador
-│   ├── tb_tabela_duracao.vhdl        # testbench da tabela de durações
-│   ├── tb_decodificador_luzes.vhdl   # testbench do decodificador
-│   ├── tb_registrador_config.vhdl    # testbench do registrador de configuração
-│   ├── tb_semaforo_top.vhdl          # testbench do sistema completo (teste simples)
 │   ├── tb_casos_semaforo.vhdl        # testbench completo do enunciado: 10 conjuntos de dados
 │   ├── tabela_casos.sh               # gera a tabela a partir do tb_casos_semaforo
 │   ├── pacote_tb.vhdl                # procedimento EXECUTA_CASO, usado pelos testbenches por caso
@@ -184,18 +178,65 @@ Tempo de execução: de `START` até `DONE` são exatamente `N_ROUNDS × (DUR_VE
 
 ## Testes
 
+Todos os testes são de **sistema completo**: o testbench trata o `SEMAFORO_TOP` como uma caixa-preta, aplica dados nas portas e confere apenas o que sai (luzes, `BUSY`, `DONE`) e quantos ciclos a execução levou.
+
 | Testbench | Módulo testado | Verificações | O que confere |
 |---|---|---|---|
-| `tb_temporizador` | `TEMPORIZADOR` | 14 | Durações de 1 a 255, `DURACAO = 0`, pausa com `HABILITA`, `RESET` no meio, recarga no meio, `TC` permanece em 1 |
-| `tb_tabela_duracao` | `TABELA_DURACAO` | 6 | Duração de cada estado (valores diferentes entre si) e `OCIOSO`/`FIM` = 1 |
-| `tb_registrador_config` | `REGISTRADOR_CONFIG` | 6 | Reset, bypass com `CAPTURA = '1'`, captura no clock, trava com `CAPTURA = '0'`, nova captura, reset no meio |
-| `tb_decodificador_luzes` | `DECODIFICADOR_LUZES` | 6 | Luzes das duas vias nos 6 estados, nunca verde nas duas |
-| `tb_semaforo_top` | sistema completo (e a FSM) | 9 | Execução completa de 22 ciclos com luzes conferidas ciclo a ciclo, `START` e mudança das entradas (`DUR_*`, `N_ROUNDS`) ignorados durante a execução, `DONE` com 1 ciclo, `RESET` no meio |
 | `tb_casos_semaforo` | sistema completo | 40 | **Testbench do enunciado:** 10 conjuntos de dados (`G_A, Y_A, G_B, Y_B, N`), cada um com 4 verificações: ciclos = `N × soma`, luzes ciclo a ciclo (nunca verde nas duas vias, `BUSY = 1`), `DONE`/`BUSY`/vermelho ao terminar, e volta a `OCIOSO` |
 
-A FSM não tem testbench próprio: é exercitada por inteiro pelo `tb_semaforo_top`.
+### O que cada entrada significa
 
-Os quatro primeiros testbenches e o `tb_semaforo_top` são testes simples de cada módulo. O `tb_casos_semaforo` é o testbench completo exigido pelo enunciado. Ele gera o clock, aplica o reset, fornece os dados, gera `START`, aguarda `DONE`, verifica o resultado e testa 10 situações diferentes.
+Cada conjunto de dados tem 5 valores, que entram pelas portas do `SEMAFORO_TOP`. Todos são contados em **ciclos de clock** e cabem em 8 bits (0 a 255).
+
+| Entrada | Porta | O que significa |
+|---|---|---|
+| `G_A` | `DUR_VERDE_A` | Quantos ciclos a Via A fica **verde** (Via B vermelha) |
+| `Y_A` | `DUR_AMARELO_A` | Quantos ciclos a Via A fica **amarela** (Via B ainda vermelha) |
+| `G_B` | `DUR_VERDE_B` | Quantos ciclos a Via B fica **verde** (Via A vermelha) |
+| `Y_B` | `DUR_AMARELO_B` | Quantos ciclos a Via B fica **amarela** (Via A ainda vermelha) |
+| `N` | `N_ROUNDS` | Quantas vezes o ciclo completo (A verde, A amarela, B verde, B amarela) se repete por `START` |
+
+`CLK`, `RESET` e `START` também são entradas, mas não fazem parte dos "dados": quem gera o clock, aplica o reset e dá o pulso de `START` é o testbench.
+
+**Regra do zero:** qualquer duração ou `N_ROUNDS` igual a `0` é tratado como `1`.
+
+### Como o resultado esperado é calculado
+
+Um **round** executa os quatro estados em sequência, então dura `G_A + Y_A + G_B + Y_B` ciclos. Com `N` rounds:
+
+```
+ciclos = N × (G_A + Y_A + G_B + Y_B)        (com 0 tratado como 1)
+```
+
+Os ciclos são contados do clock em que `START` é amostrado até o `DONE`, sem overhead.
+
+Exemplo, caso 2 (`G_A=4, Y_A=2, G_B=3, Y_B=2, N=2`): um round tem 4 + 2 + 3 + 2 = 11 ciclos, e 2 rounds dão 22. Em cada round:
+
+| Ciclos do round | Estado | Via A | Via B |
+|---|---|---|---|
+| 1 a 4 | `VERDE_A` | verde | vermelha |
+| 5 e 6 | `AMARELO_A` | amarela | vermelha |
+| 7 a 9 | `VERDE_B` | vermelha | verde |
+| 10 e 11 | `AMARELO_B` | vermelha | amarela |
+
+### O que o testbench faz em cada caso
+
+Para cada conjunto de dados, o testbench segue o roteiro do enunciado (itens 4 e 5):
+
+1. **Reset**, para partir de um estado conhecido.
+2. **Aplica os dados** em `DUR_*` e `N_ROUNDS`.
+3. **Pulso de `START`** de 1 ciclo.
+4. **Aguarda o `DONE`**, contando os ciclos e conferindo as luzes a cada ciclo.
+5. **Verifica o resultado** com as 4 verificações abaixo.
+
+| # | Verificação | O que garante |
+|---|---|---|
+| 1 | Ciclos obtidos = `N × soma` | A temporização inteira está correta |
+| 2 | Luzes corretas em todos os ciclos, nunca verde nas duas vias, `BUSY = 1` | A sequência de estados está correta e é segura |
+| 3 | Ao terminar: `DONE = 1`, `BUSY = 0`, tudo vermelho | O fim da execução é sinalizado corretamente |
+| 4 | Um ciclo depois: `DONE = 0`, `BUSY = 0` | `DONE` dura 1 ciclo e o sistema voltou a `OCIOSO` |
+
+4 verificações × 10 casos = 40 verificações.
 
 ### Os 10 casos
 
@@ -207,7 +248,7 @@ Os mesmos 10 conjuntos de dados existem de duas formas: todos juntos em um únic
 ./tests/run_todos_casos.sh       # roda os 10 casos, um por um, e imprime a tabela
 ```
 
-Cada caso gera `build/tb_caso_NN.log` e `build/tb_caso_NN.ghw`. Os sinais ficam na mesma hierarquia de antes: `tb_caso_NN` → `dut` → ...
+Cada caso gera `build/tb_caso_NN.log` e `build/tb_caso_NN.ghw`. Os sinais ficam na hierarquia `tb_caso_NN` → `dut` → ...
 
 ### Tabela dos 10 casos
 
@@ -230,7 +271,31 @@ O resultado correto é conhecido de antemão: `ciclos = N × (G_A + Y_A + G_B + 
 | 9 | 7 | 7 | 7 | 7 | 3 | 84 | 84 | OK |
 | 10 | 1 | 1 | 1 | 1 | 255 | 1020 | 1020 | OK |
 
-O que cada caso exercita: 1 e 2 são configurações típicas; 3 e 4 são o mínimo (1 ciclo por estado); 5 e 8 têm vias assimétricas; 6 usa durações máximas (255); 7 testa a regra `0 = 1`; 9 tem todas as durações iguais; 10 usa o número máximo de rounds (255).
+### A ideia de cada caso
+
+| Caso | Dados | Conta | Ideia |
+|---|---|---|---|
+| 1 | 10, 3, 10, 3, N=2 | (10+3+10+3) × 2 = 52 | **Funcionamento normal**, com os valores padrão do projeto: verde longo, amarelo curto e 2 rounds. Inclui a volta de `AMARELO_B` para `VERDE_A`. |
+| 2 | 4, 2, 3, 2, N=2 | 11 × 2 = 22 | O mesmo tipo de caso em **escala pequena**, com as vias já ligeiramente diferentes. Cabe inteiro numa tela do GTKWave, bom para figura. |
+| 3 | 1, 1, 1, 1, N=1 | 4 × 1 = 4 | **Mínimo absoluto:** cada estado dura 1 ciclo e há 1 round. Com `D = 1` o temporizador carrega 0 e `TC` já vem em `'1'`, então erros de "off-by-one" na contagem aparecem aqui. |
+| 4 | 1, 1, 1, 1, N=5 | 4 × 5 = 20 | Duração mínima com **vários rounds**: a troca de estado ocorre a cada clock e a volta de `AMARELO_B` para `VERDE_A` não tem folga. Testa o contador de rounds nas condições mais apertadas. |
+| 5 | 5, 2, 7, 3, N=1 | 17 × 1 = 17 | **Quatro durações diferentes entre si.** Se a tabela trocasse duas durações, o total de ciclos continuaria igual; quem detecta o erro é a conferência das luzes ciclo a ciclo. |
+| 6 | 255, 1, 1, 255, N=1 | 512 × 1 = 512 | **Limite de 8 bits nas durações**, com estados muito longos ao lado de estados muito curtos. Testa a contagem de 254 até 0 sem estouro. |
+| 7 | 0, 0, 0, 0, N=0 | 4 × 1 = 4 | **Regra `0 = 1`.** Sem ela, o contador carregaria `0 - 1` e cada estado duraria 255 ciclos; e `N_ROUNDS = 0` não terminaria corretamente. |
+| 8 | 3, 1, 8, 2, N=4 | 14 × 4 = 56 | **Caso mais completo:** durações todas diferentes, vias assimétricas e 4 rounds. O contador `rodada` passa por 0, 1, 2 e 3, e cada round repete exatamente a mesma sequência. É a melhor figura de "execução completa". |
+| 9 | 7, 7, 7, 7, N=3 | 28 × 3 = 84 | **Caso simétrico:** todas as durações iguais, como contraste com os casos 5 e 8. Um número de rounds ímpar e diferente de 2 evita que um erro de contagem passe despercebido. |
+| 10 | 1, 1, 1, 1, N=255 | 4 × 255 = 1020 | **Limite de 8 bits em rounds:** `rodada` sobe até 254 e a comparação `rodada + 1 >= N_ROUNDS` precisa funcionar sem estourar. Usa durações mínimas para manter a simulação curta. |
+
+Resumo por grupo:
+
+| Grupo | Casos | O que cobre |
+|---|---|---|
+| Típicos | 1, 2 | Funcionamento normal |
+| Mínimo | 3, 4 | `D = 1`, com troca de estado a cada clock |
+| Durações diferentes | 5, 8 | Cada estado recebe a duração certa; as vias são tratadas separadamente |
+| Extremos | 6, 10 | Limites de 8 bits em duração e em rounds |
+| Regra especial | 7 | Entradas `0` tratadas como `1` |
+| Controle | 9 | Caso simétrico, sem diferença entre as durações |
 
 ## Como rodar os testes
 
@@ -238,12 +303,6 @@ O que cada caso exercita: 1 e 2 são configurações típicas; 3 e 4 são o mín
 
 - [GHDL](https://github.com/ghdl/ghdl) (com suporte a VHDL-2008)
 - GTKWave (opcional, para ver as formas de onda)
-
-No Fedora:
-
-```
-sudo dnf install ghdl gtkwave
-```
 
 ### Rodando todos os testes
 
@@ -256,23 +315,13 @@ chmod +x tests/run_all.sh
 Saída esperada:
 
 ```
-PASSOU  tb_temporizador   (TODOS OS 14 TESTES)
-PASSOU  tb_tabela_duracao   (TODOS OS 6 TESTES)
-PASSOU  tb_decodificador_luzes   (TODOS OS 6 TESTES)
-PASSOU  tb_registrador_config   (TODOS OS 6 TESTES)
-PASSOU  tb_semaforo_top   (TODOS OS 9 TESTES)
 PASSOU  tb_casos_semaforo   (TODOS OS 40 TESTES)
 ----------------------------------------
-6 de 6 testbenches passaram
+1 de 1 testbenches passaram
 ```
 
 Se algum falhar, aparece `FALHOU` e o log completo fica em `build/<testbench>.log`. O script pode ser chamado de qualquer pasta.
 
-### Rodando só o teste do temporizador
-
-```
-./tests/run_test_temporizador.sh
-```
 
 ### Ver as formas de onda
 
@@ -284,35 +333,11 @@ gtkwave build/tb_semaforo_top.ghw
 
 No GTKWave, para o sistema completo, expanda `tb_semaforo_top` → `dut` e adicione: `clk`, `reset`, `start`, `luz_a`, `luz_b`, `busy`, `done`, as entradas `dur_*` e `n_rounds`, e os sinais internos `s_estado`, `s_estado_prox`, `s_carrega`, `s_tc`, `s_duracao`, `s_captura` e `s_cfg`. Dentro de `u_fsm`, `rodada` mostra os rounds concluídos. Dentro de `u_temporizador`, o sinal `cont` mostra a contagem regressiva de cada estado. Para o temporizador isolado, use `tb_temporizador` → `dut` → `cont`.
 
-### Rodando manualmente, sem o script
+### Sobre as ondas
 
-A partir da pasta `circuitos-logicos/`:
-
-```
-mkdir -p build
-ghdl -a --std=08 --workdir=build pacote_semaforo.vhdl
-ghdl -a --std=08 --workdir=build temporizador.vhdl
-ghdl -a --std=08 --workdir=build tabela_duracao.vhdl
-ghdl -a --std=08 --workdir=build decodificador_luzes.vhdl
-ghdl -a --std=08 --workdir=build registrador_config.vhdl
-ghdl -a --std=08 --workdir=build fsm_semaforo.vhdl
-ghdl -a --std=08 --workdir=build semaforo_top.vhdl
-ghdl -a --std=08 --workdir=build tests/tb_semaforo_top.vhdl
-cd build
-ghdl -e --std=08 --workdir=. tb_semaforo_top
-ghdl -r --std=08 --workdir=. tb_semaforo_top --stop-time=200us --wave=tb_semaforo_top.ghw
-cd ..
-```
-
-Elaborar e rodar de dentro de `build/` evita espalhar arquivos do GHDL (`e~*.o` e executáveis) pela raiz do projeto. O `--stop-time` (200 µs, folgado para o maior caso, que leva ~18 µs) serve de segurança: o clock é gerado por `CLK <= NOT CLK AFTER ...`, então uma simulação que não termina sozinha rodaria para sempre.
-
-## Ordem de compilação
-
-```
-pacote_semaforo -> temporizador -> tabela_duracao -> decodificador_luzes -> registrador_config -> fsm_semaforo -> semaforo_top -> testbenches
-```
-
-O `pacote_semaforo` sempre vem primeiro, pois os outros arquivos dependem dele.
+- `100` - Vermelho
+- `010` - Amarelo
+- `001` - Verde
 
 ## Convenções do projeto
 
@@ -326,38 +351,3 @@ O `pacote_semaforo` sempre vem primeiro, pois os outros arquivos dependem dele.
 - `START` é lido por nível, só no estado `OCIOSO`. Se ficar em `'1'` depois do `DONE`, a FSM inicia outra execução imediatamente. Um sincronizador com detector de borda (`start_sync`) evitaria isso, mas não é necessário para o funcionamento em simulação.
 - Durações e número de rounds limitados a 255 (`LARGURA_DUR = 8`); basta aumentar a constante no pacote para valores maiores.
 - As entradas `DUR_*` e `N_ROUNDS` precisam estar estáveis no clock em que `START` é amostrado; não há sincronização nem validação de faixa (o valor `0` vira `1`).
-
-## Próximos passos
-
-- Formas de onda e capturas para o relatório
-- Diagramas de bloco (sistema, FSM, temporizador, caminho de dados)
-- Relatório (formato IEEE) e vídeo de apresentação
-- Opcionais: modo noturno, botão de pedestres (a temporização programável por portas já está implementada)
-
-
-## Saída após rodar todos os casos de teste
-
-| Caso | G_A | Y_A | G_B | Y_B | N | Esperado (ciclos) | Obtido (ciclos) | Resultado |
-|---|---|---|---|---|---|---|---|---|
-| 1 | 10 | 3 | 10 | 3 | 2 | 52 | 52 | OK |
-| 2 | 4 | 2 | 3 | 2 | 2 | 22 | 22 | OK |
-| 3 | 1 | 1 | 1 | 1 | 1 | 4 | 4 | OK |
-| 4 | 1 | 1 | 1 | 1 | 5 | 20 | 20 | OK |
-| 5 | 5 | 2 | 7 | 3 | 1 | 17 | 17 | OK |
-| 6 | 255 | 1 | 1 | 255 | 1 | 512 | 512 | OK |
-| 7 | 0 | 0 | 0 | 0 | 0 | 4 | 4 | OK |
-| 8 | 3 | 1 | 8 | 2 | 4 | 56 | 56 | OK |
-| 9 | 7 | 7 | 7 | 7 | 3 | 84 | 84 | OK |
-| 10 | 1 | 1 | 1 | 1 | 255 | 1020 | 1020 | OK |
-
-## Sobre as ondas
-
-Para rodar visualizar a simulação com as ondas, execute:
-
-```
-gtkwave build/nome_do_arquivo.ghw
-```
-
-- `100` - Vermelho
-- `010` - Amarelo
-- `001` - Verde
